@@ -152,15 +152,19 @@ async function syncCustomerMetadata(event: ProcessedPluginEvent, storage: Storag
     const customerStatusArray = (await storage.get(customerStatusKey, [])) as string[]
     const customerStatus = new Set(customerStatusArray) as Customer['status']
     const customerExistsAlready = customerStatus.has('seen')
-    const email = getEmailFromEvent(event)
+    
+    // Get all available identifiers from current event
+    const identifiers = getIdentifiersFromEvent(event)
+    const email = identifiers.email
 
-    console.debug(email)
+    console.debug('Identifiers found:', identifiers)
 
-    // Update customer status
+    // Update customer status based on available identifiers
     customerStatus.add('seen')
     if (event.event === '$identify') {
         customerStatus.add('identified')
     }
+    // Mark as having email if we found one from any identifier source
     if (email) {
         customerStatus.add('with_email')
     }
@@ -246,18 +250,32 @@ function isEmail(email: string): boolean {
     return re.test(email.toLowerCase())
 }
 
+interface UserIdentifiers {
+    email: string | null
+    userId: string | null
+    cioId: string | null
+}
+
+function getIdentifiersFromEvent(event: ProcessedPluginEvent): UserIdentifiers {
+    const setAttribute = event.$set || {}
+    
+    // Check for email in $set first, then distinct_id as fallback
+    let email: string | null = null
+    if (setAttribute.email && isEmail(setAttribute.email)) {
+        email = setAttribute.email
+    } else if (isEmail(event.distinct_id)) {
+        email = event.distinct_id
+    }
+    
+    // Extract userId and cio_id from $set attributes
+    const userId = setAttribute.userId ? String(setAttribute.userId) : null
+    const cioId = setAttribute.cio_id ? String(setAttribute.cio_id) : null
+    
+    return { email, userId, cioId }
+}
+
+// Keep original function for backward compatibility but enhance it
 function getEmailFromEvent(event: ProcessedPluginEvent): string | null {
-    const setAttribute = event.$set
-    if (typeof setAttribute !== 'object' || !setAttribute['email']) {
-        return null
-    }
-    const emailCandidate = setAttribute['email']
-    if (isEmail(emailCandidate)) {
-        return emailCandidate
-    }
-    // Use distinct ID as a last resort
-    if (isEmail(event.distinct_id)) {
-        return event.distinct_id
-    }
-    return null
+    const identifiers = getIdentifiersFromEvent(event)
+    return identifiers.email
 }
